@@ -1,4 +1,5 @@
 import json
+import urllib.parse
 from typing import Any, Iterable
 import scrapy
 from scrapy.http import Request, Response
@@ -6,7 +7,7 @@ import re
 
 input_file = 'directorydata.json'
 desired_company_names = [
-"Fredrikson & Byron"
+"Company name","Valerie Redhorse","Dennis C. Healey EA","Morel Construction Co.","Utah Clean Energy","Holland & Hart","Green Lantern Solar","Trico Electric Coop","Meridian Clean Energy","Fredrikson & Byron","Hope Community Capital","dGEN Energy Partners","U.S. Department of Agriculture","Greenday Finance","San Diego Community Power","East Bay Community Energy","National Cooperative Bank","Duncan","Valley Electric Association","LIUNA","Avisen Legal","City of San José","Solariant Capital","Michigan Saves","Capital Power","clean-dev.com","SMUD","Barr Engineering Co.","US Solar","Legacy Bank and Trust","University of Colorado Boulder","Sunpin Solar","Carbonvert","Electric Power Engineers","Wilson Sonsini Goodrich & Rosati","NTUA","NextEra Energy","JEPIC-USA","Renewable America","Jupiter Power","Copia Power","bluejenergy.com","syso.com","UAMPS","cacommunitypower.org","Home Run Financing","Redwood Coast Energy Authority","Wisconsin","Empowered Energy","Norton Rose Fulbright","National Renewable Energy Laboratory","hardestycpa.com","Ackerman CPAs","keslou.com","Genz Associates","Elective","Grace Hebert Curtis Architects","Aircuity","Grove Climate Group","Energy Optimizers, USA","Iowa Lakes Electric","Traverse City Light & Power","IOWN Renewable Energy","Seattle.gov","Colorado Clean Energy Fund","EightTwenty","Powell County High School","kma-studio.co","DNV","Birchfield Penuel Architects","Jordin Marshall","Fortress Power","Hussung Mechanical Contractors","Cornerstone Engineering","Generation Solar","Islamic Society of Orange County","Clean Energy Group","Skyview Ventures","Solops Solar","Davis Hill Development","Clearway Energy","Strategic Energy Solutions","Bernhard","Pedal Steel Solar","HED","Turner Construction","Michigan State Police","Coalition for Green Capital","Silfab Solar","Los Angeles, California","Polk Group","Harding, Shymanski & Company, P.S.C.","TMP Architecture","Anglin Reichmann Armstrong","Veolia North America","CEP Renewables","Evans Engineering and Consulting","Day & Zimmermann","Energy Transfer","5 Architecture","Af-Architect.com","Pathward","Bristol Bay Native","United Mechanical","Trane Technologies","heyglide.com","Glide","Hoefer Welker","Altman + Barrett Architects","Novele","LUX Speed Capital","Bartlett Hartley & Mulkey","Delta G Consulting Engineers","Metropolitan Transit Authority of Harris County","SitelogIQ","Nevada Clean Energy Fund","Camber","genesysgeo.com","University Place, WA","Georgia Institute of Technology","Town of Needham","ADW Architects","Wagner Murray","Progressive AE","Studio S Architecture","Insight Architects","Ragona Architecture & Design","Jenkins•Peer Architects","Neighboring Concepts","BB+M Architecture","Little","Perspectus Architecture","The Lawrence Group","Neumann Monson Architects","WDD Architects","French Architects","WER Architects","TAGGART / Architects","SCM Architects","Plunkett Raysich Architects,","genesishightech.com","Business Coaching VAs","NYSUT","Kansas Department of Administration","Indianapolis Public Library","Polk County Health","Prairie Engineers"
 ]  # Please make sure to check the spellings of the names given
 company_urls = []
 
@@ -14,11 +15,25 @@ def get_url_by_company_name():
     try:
         with open(input_file, 'r') as json_file:
             data = json.load(json_file)
+            
+            # Ensure JSON is a list of dictionaries
+            if not isinstance(data, list) or not all(isinstance(d, dict) for d in data):
+                raise ValueError("JSON must be a list of dictionaries")
+
             for name in desired_company_names:
                 for company_data in data:
                     if name in company_data:
-                        url = str(company_data[name])
-                        company_urls.append(url)
+                        raw_url = str(company_data[name]).strip()
+                        
+                        # Encode special characters in the URL
+                        encoded_url = urllib.parse.quote(raw_url, safe=":/?#[]@!$&'()*+,;=")
+                        
+                        # Validate URL structure
+                        if not urllib.parse.urlparse(encoded_url).scheme:
+                            print(f"Invalid URL skipped: {raw_url}")
+                            continue
+                        
+                        company_urls.append(encoded_url)
             
             print("Company URLs:", set(company_urls))
     except FileNotFoundError:
