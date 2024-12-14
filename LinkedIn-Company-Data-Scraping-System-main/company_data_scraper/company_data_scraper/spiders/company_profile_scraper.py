@@ -1,0 +1,157 @@
+import json
+from typing import Any, Iterable
+import scrapy
+from scrapy.http import Request, Response
+import re
+
+input_file = 'directorydata.json'
+desired_company_names = [
+"Fredrikson & Byron"
+]  # Please make sure to check the spellings of the names given
+company_urls = []
+
+def get_url_by_company_name():
+    try:
+        with open(input_file, 'r') as json_file:
+            data = json.load(json_file)
+            for name in desired_company_names:
+                for company_data in data:
+                    if name in company_data:
+                        url = str(company_data[name])
+                        company_urls.append(url)
+            
+            print("Company URLs:", set(company_urls))
+    except FileNotFoundError:
+        print(f"Error: JSON file '{input_file}' not found.")
+    except Exception as e:
+        print(f"An error occurred while reading JSON file: {str(e)}")
+
+
+class CompanyProfileScraperSpider(scrapy.Spider):
+    name = 'company_profile_scraper'
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        get_url_by_company_name()
+
+        if not company_urls:
+            print("No company URLs found. Exiting spider.")
+            raise ValueError("No URLs to scrape.")
+
+        self.company_pages = list(set(company_urls.copy()))
+
+    def start_requests(self):
+        company_index_tracker = 0
+
+        first_url = self.company_pages[company_index_tracker]
+        yield scrapy.Request(url=first_url, callback=self.parse_response,
+                             meta={'company_index_tracker': company_index_tracker})
+
+    def parse_response(self, response):
+        company_index_tracker = response.meta['company_index_tracker']
+        print('********')
+        print(f'Scraping page: {str(company_index_tracker + 1)} of {str(len(self.company_pages))}')
+        print('********')
+
+        company_item = {}
+
+        company_item['company_name'] = response.css('.top-card-layout__entity-info h1::text').get(
+            default='not-found').strip()
+
+        # Updated code to handle followers count as a float then convert to int
+        followers_text = response.xpath(
+            '//h3[contains(@class, "top-card-layout__first-subline")]/span/following-sibling::text()').get()
+        if followers_text:
+            followers_count = followers_text.split()[0].strip().replace(',', '')
+            try:
+                company_item['linkedin_followers_count'] = int(float(followers_count))  # Convert to float first then to int
+            except ValueError:
+                company_item['linkedin_followers_count'] = 0  # Default to 0 if conversion fails
+
+        # Handle logo extraction
+        company_item['company_logo_url'] = response.css(
+            'div.top-card-layout__entity-image-container img::attr(data-delayed-url)').get('not-found')
+
+        # Handle 'About Us' section
+        company_item['about_us'] = response.css('.core-section-container__content p::text').get(
+            default='not-found').strip()
+
+        try:
+            followers_num_match = re.findall(r'\d{1,3}(?:,\d{3})*',
+                                             response.css('a.face-pile__cta::text').get(default='not-found').strip())
+            if followers_num_match:
+                company_item['num_of_employees'] = int(followers_num_match[0].replace(',', ''))
+            else:
+                company_item['num_of_employees'] = response.css('a.face-pile__cta::text').get(
+                    default='not-found').strip()
+        except Exception as e:
+            print(f"Error occurred while getting number of employees: {e}")
+            company_item['num_of_employees'] = 'not-found'  # Fallback value for errors
+
+        try:
+            company_details = response.css('.core-section-container__content .mb-2')
+
+            company_item['website'] = company_details[0].css('a::text').get(default='not-found').strip()
+
+            company_industry_line = company_details[1].css('.text-md::text').getall()
+            company_item['industry'] = company_industry_line[1].strip()
+
+            company_size_line = company_details[2].css('.text-md::text').getall()
+            company_item['company_size_approx'] = company_size_line[1].strip().split()[0]
+
+            company_headquarters = company_details[3].css('.text-md::text').getall()
+            if company_headquarters[0].lower().strip() == 'headquarters':
+                company_item['headquarters'] = company_headquarters[1].strip()
+            else:
+                company_item['headquarters'] = 'not-found'
+
+            company_type = company_details[4].css('.text-md::text').getall()
+            company_item['type'] = company_type[1].strip()
+
+            # Specialties or founded handling
+            unsure_parameter = company_details[5].css('.text-md::text').getall()
+            unsure_parameter_key = unsure_parameter[0].lower().strip()
+            company_item[unsure_parameter_key] = unsure_parameter[1].strip()
+
+            if unsure_parameter_key == 'founded':
+                company_specialties = company_details[6].css('.text-md::text').getall()
+                if company_specialties[0].lower().strip() == 'specialties':
+                    company_item['specialties'] = company_specialties[1].strip()
+                else:
+                    company_item['specialties'] = 'not-found'
+            elif unsure_parameter_key != 'specialties' or unsure_parameter_key == 'founded':
+                company_item['founded'] = 'not-found'
+                company_item['specialties'] = 'not-found'
+
+            # Funding parameters
+            company_item['funding'] = response.css('p.text-display-lg::text').get(default='not-found').strip()
+
+            # Safely handle funding_total_rounds field
+            funding_rounds_text = response.xpath(
+                '//section[contains(@class, "aside-section-container")]/div/a[contains(@class, "link-styled")]//span[contains(@class, "before:middot")]/text()').get('not-found').strip()
+            if funding_rounds_text != 'not-found':
+                try:
+                    company_item['funding_total_rounds'] = int(funding_rounds_text.split()[0])
+                except ValueError:
+                    company_item['funding_total_rounds'] = 0  # Default to 0 if conversion fails
+            else:
+                company_item['funding_total_rounds'] = 0  # Default to 0 if not found
+
+            company_item['funding_option'] = response.xpath(
+                '//section[contains(@class, "aside-section-container")]/div//div[contains(@class, "my-2")]/a[contains(@class, "link-styled")]/text()').get(
+                'not-found').strip()
+            company_item['last_funding_round'] = response.xpath(
+                '//section[contains(@class, "aside-section-container")]/div//div[contains(@class, "my-2")]/a[contains(@class, "link-styled")]//time[contains(@class, "before:middot")]/text()').get(
+                'not-found').strip()
+
+        except IndexError:
+            print("Error: *****Skipped index, as some details are missing*********")
+
+        yield company_item
+
+        company_index_tracker += 1
+
+        if company_index_tracker <= len(self.company_pages) - 1:
+            next_url = self.company_pages[company_index_tracker]
+            yield scrapy.Request(url=next_url, callback=self.parse_response,
+                                 meta={'company_index_tracker': company_index_tracker})
